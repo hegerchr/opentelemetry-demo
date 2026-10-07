@@ -85,14 +85,14 @@ jobs:
             git push
             \`\`\`
 
-            **Note:** If \`src/payment/package.json\` conflicts, take upstream version and add:
+            **Note:** If \`src/payment/package.json\` conflicts, keep upstream's version and re-add
+            this one line to \`\"dependencies\"\`:
             \`\`\`json
             \"@elastic/opentelemetry-node\": \"1.5.0\"
             \`\`\`
-            And update the start script to:
-            \`\`\`json
-            \"start\": \"OTEL_EXPORTER_OTLP_PROTOCOL=grpc node --require @elastic/opentelemetry-node index.js\"
-            \`\`\`
+            No other changes are needed — the \`\"start\"\` script and \`src/payment/Dockerfile\`
+            now match upstream exactly (EDOT is injected via \`docker-compose.elastic.yml\`'s
+            \`NODE_OPTIONS\` instead), so they shouldn't conflict at all.
 
             ---
             *This PR was automatically created.*
