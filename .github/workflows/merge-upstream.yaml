@@ -85,14 +85,65 @@ jobs:
             git push
             \`\`\`
 
-            **Note:** If \`src/payment/package.json\` conflicts, keep upstream's version and re-add
-            this one line to \`\"dependencies\"\`:
-            \`\`\`json
-            \"@elastic/opentelemetry-node\": \"1.5.0\"
-            \`\`\`
-            No other changes are needed — the \`\"start\"\` script and \`src/payment/Dockerfile\`
-            now match upstream exactly (EDOT is injected via \`docker-compose.elastic.yml\`'s
-            \`NODE_OPTIONS\` instead), so they shouldn't conflict at all.
+            ### How this fork's Elastic customizations are structured
+
+            Most Elastic customizations live in files upstream doesn't have at all, so they
+            **cannot conflict**: every \`Dockerfile.elastic\` (\`src/<service>/Dockerfile.elastic\`,
+            one per EDOT-instrumented service), \`.env.override\`, \`docker-compose.elastic.yml\`, and
+            \`demo.sh\`. Each \`Dockerfile.elastic\` is selected via a per-service \`dockerfile:\`
+            variable (e.g. \`${AD_DOCKERFILE}\`) in \`compose.yaml\`/\`compose.full.yaml\` — that
+            indirection is upstream's own mechanism (every service uses it), not something this fork
+            added, so those compose files need no Elastic-specific changes either.
+
+            A few services needed a **real edit to an upstream-shared file** because the vanilla
+            community agent's package reference had to be removed for EDOT's zero-code agent to take
+            over cleanly. These are the only known places a conflict can occur, and in every case the
+            agent reference is a straight deletion — if upstream bumps that same line's version, git
+            reports a delete/modify conflict:
+
+            - \`src/cart/src/cart.csproj\` / \`src/cart/Directory.Packages.props\`: all
+              \`OpenTelemetry.*\` \`PackageReference\`/\`PackageVersion\` entries are deleted (EDOT .NET
+              is attached via the profiler from \`Dockerfile.elastic\` instead), and
+              \`PublishSingleFile\`/\`SelfContained\` are set to \`false\` (required so the profiler's
+              bundled assemblies don't collide with cart's own self-contained copies). **Resolution:**
+              keep the deletion / \`false\` values, take upstream's version bumps for every other
+              package normally.
+            - \`src/accounting/Accounting.csproj\` / \`src/accounting/Directory.Packages.props\`: the
+              \`OpenTelemetry.AutoInstrumentation\` reference is deleted (same reason as cart), and
+              \`Microsoft.Extensions.Hosting\` is added explicitly (it used to arrive transitively
+              through the removed package; \`Consumer.cs\`/\`Program.cs\` need it directly).
+              **Resolution:** keep the deletion and the added \`Microsoft.Extensions.Hosting\` line,
+              take upstream's bumps otherwise. Note \`Directory.Packages.props\` here is indented
+              differently from upstream (4 spaces vs 2), so even an unrelated upstream edit to this
+              file can show as a whole-line diff — read the actual content of each hunk, don't trust
+              the line numbers.
+            - \`src/payment/package.json\`: keep upstream's version and re-add this one line to
+              \`\"dependencies\"\`:
+              \`\`\`json
+              \"@elastic/opentelemetry-node\": \"1.5.0\"
+              \`\`\`
+              No other changes are needed — the \`\"start\"\` script and \`src/payment/Dockerfile\`
+              match upstream exactly (EDOT is injected via \`docker-compose.elastic.yml\`'s
+              \`NODE_OPTIONS\` instead), so they shouldn't conflict at all.
+
+            \`src/recommendation/requirements.in\`/\`.txt\`, \`src/quote/composer.json\`, and every other
+            per-service dependency-pin file carry **no** Elastic edits (EDOT is added purely inside
+            \`Dockerfile.elastic\` by installing/uninstalling packages at image-build time) — any diff
+            you see there is just upstream version drift and should merge and resolve like any normal
+            upstream file, taking upstream's side.
+
+            ### After merging: this still needs a real test, not just a clean merge
+
+            A text-level merge succeeding does **not** mean EDOT still works — e.g. an upstream base
+            image or package bump can silently break an assumption baked into a \`Dockerfile.elastic\`
+            (architecture/libc variant, exact version pin, entry point name). For every service with a
+            \`Dockerfile.elastic\` (currently: ad, fraud-detection, kafka, cart, accounting, quote,
+            recommendation; payment is the exception, see above), rebuild it and confirm with a live
+            check — bring the stack up, enable collector debug logging
+            (\`--set=service::telemetry::logs::level=debug\` on the \`otel-collector\` command), drive
+            real traffic through the frontend, and grep the collector logs for that service's
+            \`service.name\` together with \`telemetry.distro.name: elastic\`. Don't rely on the build
+            succeeding alone.
 
             ---
             *This PR was automatically created.*
